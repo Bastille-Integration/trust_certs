@@ -82,7 +82,7 @@ Both of these live at the top of the multi-host logic in `trust-bn.sh`:
 
 ### Exclude hostnames
 
-`grep -vE '^(kafka|concentrator|elastic[0-9]+|fusion-center[0-9]*|kibana|lighthouse|loadbalancer|network-services|redis)\.'`
+`grep -vE '^(kafka|concentrator|elastic[0-9]+|fusion-center[0-9]*|kibana|lighthouse|loadbalancer|network-services|redis|storage)\.'`
 
 Add alternations here to skip more hosts. Current list excludes hosts
 that don't serve TLS on their listed port.

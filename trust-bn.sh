@@ -184,7 +184,7 @@ elif [[ "$mode" == "2" ]]; then
     hostnames=$(printf '%s\n' "$yml" \
         | grep -oE '[a-zA-Z][a-zA-Z0-9-]*(\.[a-zA-Z0-9][a-zA-Z0-9-]*)+' \
         | grep -vE '\.(yml|yaml|json|conf|sh|txt|md)$' \
-        | grep -vE '^(kafka|concentrator|elastic[0-9]+|fusion-center[0-9]*|kibana|lighthouse|loadbalancer|network-services|redis)\.' \
+        | grep -vE '^(kafka|concentrator|elastic[0-9]+|fusion-center[0-9]*|kibana|lighthouse|loadbalancer|network-services|redis|storage)\.' \
         | sort -u)
 
     if [[ -z "$hostnames" ]]; then
