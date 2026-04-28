@@ -12,6 +12,22 @@ top-of-chain cert as a trusted root in the macOS System keychain.
   mode). The restricted shell must allow the `file view home <file>`
   command via the SSH exec channel.
 
+## Install
+
+Clone the repo and make the script executable:
+
+```sh
+git clone git@github.com:dalybastille/trust_certs.git
+cd trust_certs
+chmod +x trust-bn.sh
+```
+
+If you don't have SSH access set up for GitHub, use HTTPS instead:
+
+```sh
+git clone https://github.com/dalybastille/trust_certs.git
+```
+
 ## Usage
 
 ```
