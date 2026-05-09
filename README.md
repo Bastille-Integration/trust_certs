@@ -1,16 +1,30 @@
-# trust-bn
+# trust-cert
 
 Fetch TLS certificates from Bastille internal services and install the
-top-of-chain cert as a trusted root in the macOS System keychain.
+top-of-chain cert as a trusted root.
+
+| Script | Platform | Trust store |
+|--------|----------|-------------|
+| `trust-cert-mac.sh` | macOS | System keychain (`security`) |
+| `trust-cert-windows.ps1` | Windows | Certificate Store (`LocalMachine\Root`) |
 
 ## Requirements
 
-- macOS (uses `security` and the System keychain).
+### macOS (`trust-cert-mac.sh`)
+
 - `openssl` (ships with macOS).
 - `expect` (ships with macOS) — only needed for multi-cert mode.
-- SSH access to the network services host (only needed for multi-cert
-  mode). The restricted shell must allow the `file view home <file>`
-  command via the SSH exec channel.
+- SSH access to the network services host (only needed for multi-cert mode).
+
+### Windows (`trust-cert-windows.ps1`)
+
+- PowerShell 5.1 or later (ships with Windows 10/11).
+- `plink.exe` (PuTTY) on `PATH` — only needed for multi-cert mode.
+  Install via: `winget install PuTTY.PuTTY` or https://www.putty.org
+- Administrator privileges (not required for `--dry-run` / `-DryRun`).
+
+The restricted shell on the network services host must allow the
+`file view home <file>` command via the SSH exec channel.
 
 ## Install
 
@@ -30,11 +44,17 @@ git clone https://github.com/dalybastille/trust_certs.git
 
 ## Usage
 
+**macOS:**
 ```
-./trust-bn.sh [-h] [-n|--dry-run]
+./trust-cert-mac.sh [-h] [-n|--dry-run]
 ```
 
-Running the script starts an interactive prompt:
+**Windows (run from an elevated PowerShell):**
+```
+.\trust-cert-windows.ps1 [-DryRun] [-Help]
+```
+
+Running either script starts an interactive prompt:
 
 ```
 Trust mode:
@@ -58,53 +78,56 @@ the TLS chain, prints the chain's subject lines, and installs the
 3. Extracts FQDN-looking hostnames from the YAML response, filters out
    hosts known not to serve TLS on their listed port, and dedupes.
 4. Shows the detected list and offers `y` / `e=edit` / `n`. Edit opens
-   `$EDITOR` (or `nano`) on a temp file so you can tweak before proceeding.
-5. Caches a single `sudo` ticket up front.
-6. For each hostname, fetches the chain on the port returned by
-   `port_for` (see below), skips hosts whose top-of-chain cert is already
-   trusted in the keychain, and installs the rest in one batch.
+   `$EDITOR` (or `nano`/`notepad`) on a temp file so you can tweak before
+   proceeding.
+5. For each hostname, fetches the chain on the appropriate port, skips
+   hosts whose top-of-chain cert is already trusted, and installs the rest.
 
 ### Dry run
 
-`./trust-bn.sh --dry-run` (or `-n`) does everything except the actual
-`sudo security add-trusted-cert` calls. No keychain changes, no sudo
-prompt. Use this to preview which certs would be installed.
+**macOS:** `./trust-cert-mac.sh --dry-run` (or `-n`)  
+**Windows:** `.\trust-cert-windows.ps1 -DryRun`
+
+Does everything except the actual trust installation — no keychain/store
+changes, no elevated privileges required. Use this to preview which certs
+would be installed.
 
 ## Output
 
-Each fetch produces a per-run subdirectory:
+Each fetch produces a per-run subdirectory under `~/.trust-bn-certs/`
+(`%USERPROFILE%\.trust-bn-certs\` on Windows):
 
 ```
 ~/.trust-bn-certs/
 └── admin.bn.internal_2026_04_24_15_30/
-    ├── chain.pem       # full chain as sent by the server
+    ├── chain.pem       # full chain as sent by the server (macOS only)
     ├── cert_1.pem      # leaf
     ├── cert_2.pem      # intermediate (if present)
     └── cert_3.pem      # top-of-chain (the one that gets trusted)
 ```
 
-The top-of-chain cert is what `add-trusted-cert -r trustRoot` installs.
-Leaf and intermediate certs are kept on disk for reference but not added
-to the keychain — the server presents them on each connection.
+The top-of-chain cert is the one installed as the trusted root.
+Leaf and intermediate certs are kept on disk for reference.
 
-Chain summary printed to stderr includes a `[self-signed]` marker where
-subject equals issuer, so you can tell at a glance whether the top cert
-is a proper root or (for example) an intermediate that the server is not
-sending the root for.
+Chain summary includes a `[self-signed]` marker where subject equals issuer,
+so you can tell at a glance whether the top cert is a proper root or an
+intermediate that the server isn't sending the root for.
 
 ## Customization
 
-Both of these live at the top of the multi-host logic in `trust-bn.sh`:
-
 ### Exclude hostnames
 
-`grep -vE '^(kafka|concentrator|elastic[0-9]+|fusion-center[0-9]*|kibana|lighthouse|loadbalancer|network-services|redis|storage)\.'`
+Both scripts filter out infrastructure hosts that don't serve client-facing
+TLS. The pattern lives near the YAML parsing section:
 
-Add alternations here to skip more hosts. Current list excludes hosts
-that don't serve TLS on their listed port.
+**macOS:** `grep -vE '^(kafka|concentrator|elastic[0-9]+|...)\.`  
+**Windows:** `$excludePrefix = '^(kafka|concentrator|elastic\d+|...)\.'`
+
+Add alternations to either to skip additional hosts.
 
 ### Per-host ports
 
+**macOS:**
 ```sh
 port_for() {
     case "$1" in
@@ -114,21 +137,34 @@ port_for() {
 }
 ```
 
+**Windows:**
+```powershell
+function Get-PortForHost {
+    param([string]$HostName)
+    if ($HostName -like "elastic.*") { return 5601 }
+    return 443
+}
+```
+
 Add cases for any host whose TLS endpoint isn't on 443.
 
 ## Idempotency
 
-Before installing, the script compares the SHA-1 fingerprint of the
-top-of-chain cert against everything already in the System keychain. If
-a match exists, the install is skipped. Safe to re-run.
+Before installing, the script compares the fingerprint of the top-of-chain
+cert against certs already in the trust store. If a match exists, the
+install is skipped. Safe to re-run.
 
 ## Uninstall
 
-`add-trusted-cert` adds a trust setting without removing the cert's
-previous state. To reverse a trust decision:
-
+**macOS:**
 ```sh
 sudo security remove-trusted-cert -d ~/.trust-bn-certs/<dir>/cert_N.pem
 ```
-
 Or use Keychain Access → System keychain to edit/delete trust.
+
+**Windows (elevated PowerShell):**
+```powershell
+$cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2("$env:USERPROFILE\.trust-bn-certs\<dir>\cert_N.pem")
+Get-ChildItem Cert:\LocalMachine\Root | Where-Object { $_.Thumbprint -eq $cert.Thumbprint } | Remove-Item
+```
+Or use `certmgr.msc` → Trusted Root Certification Authorities to delete manually.
