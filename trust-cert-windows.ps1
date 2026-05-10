@@ -131,6 +131,40 @@ function Install-Trust {
     Write-Host "  Installed." -ForegroundColor Green
 }
 
+function Remove-OldTrustedByCn {
+    param([string]$CertPath)
+
+    $newCert  = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2($CertPath)
+    $cn       = $newCert.GetNameInfo([System.Security.Cryptography.X509Certificates.X509NameType]::SimpleName, $false)
+    $newThumb = $newCert.Thumbprint
+
+    $openMode = if ($DryRun) {
+        [System.Security.Cryptography.X509Certificates.OpenFlags]::ReadOnly
+    } else {
+        [System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite
+    }
+    $store = New-Object System.Security.Cryptography.X509Certificates.X509Store(
+        [System.Security.Cryptography.X509Certificates.StoreName]::Root,
+        [System.Security.Cryptography.X509Certificates.StoreLocation]::LocalMachine
+    )
+    $store.Open($openMode)
+
+    $toRemove = @($store.Certificates | Where-Object {
+        $_.GetNameInfo([System.Security.Cryptography.X509Certificates.X509NameType]::SimpleName, $false) -eq $cn -and
+        $_.Thumbprint -ne $newThumb
+    })
+
+    foreach ($cert in $toRemove) {
+        if ($DryRun) {
+            Write-Host "  [dry-run] would remove old trusted cert with CN='$cn' (Thumbprint: $($cert.Thumbprint))"
+        } else {
+            Write-Host "  Removing old trusted cert with CN='$cn' (Thumbprint: $($cert.Thumbprint))..."
+            $store.Remove($cert)
+        }
+    }
+    $store.Close()
+}
+
 function Get-PortForHost {
     param([string]$HostName)
     if ($HostName -like "elastic.*") { return 5601 }
@@ -199,6 +233,7 @@ if ($mode -eq "1") {
     } else {
         Write-Host "Installing as trusted root (requires admin)..."
     }
+    Remove-OldTrustedByCn $rootCert
     Install-Trust $rootCert
 
 } elseif ($mode -eq "2") {
@@ -294,6 +329,7 @@ if ($mode -eq "1") {
         Write-Host "Installing $($roots.Count) new trusted root(s)..."
     }
     foreach ($r in $roots) {
+        Remove-OldTrustedByCn $r
         Install-Trust $r
     }
 

@@ -81,6 +81,42 @@ install_trust() {
     sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain "$1"
 }
 
+remove_old_cn() {
+    local cert_path=$1
+    local new_fp cn
+    new_fp=$(openssl x509 -in "$cert_path" -noout -fingerprint -sha1 | sed 's/.*=//;s/://g' | tr '[:upper:]' '[:lower:]')
+    cn=$(openssl x509 -in "$cert_path" -noout -subject -nameopt multiline 2>/dev/null \
+         | awk -F' = ' '/^\s*commonName/ { print $2 }')
+
+    [[ -z "$cn" ]] && return 0
+
+    local tmp_dir
+    tmp_dir=$(mktemp -d)
+    security find-certificate -a -c "$cn" -p /Library/Keychains/System.keychain 2>/dev/null \
+        | awk -v dir="$tmp_dir" '
+            /-BEGIN CERTIFICATE-/ { n++; f = dir "/" n ".pem" }
+            n > 0 { print > f }
+        '
+
+    local cert_file fp cert_cn
+    for cert_file in "$tmp_dir"/*.pem; do
+        [[ -f "$cert_file" ]] || continue
+        cert_cn=$(openssl x509 -in "$cert_file" -noout -subject -nameopt multiline 2>/dev/null \
+                  | awk -F' = ' '/^\s*commonName/ { print $2 }')
+        [[ "$cert_cn" != "$cn" ]] && continue
+        fp=$(openssl x509 -in "$cert_file" -noout -fingerprint -sha1 2>/dev/null \
+             | sed 's/.*=//;s/://g' | tr '[:upper:]' '[:lower:]')
+        [[ -z "$fp" || "$fp" == "$new_fp" ]] && continue
+        if [[ "$DRY_RUN" == "1" ]]; then
+            echo "  [dry-run] would remove old trusted cert with CN='${cn}' (SHA1: $fp)"
+        else
+            echo "  Removing old trusted cert with CN='${cn}' (SHA1: $fp)..."
+            sudo security delete-certificate -Z "$fp" /Library/Keychains/System.keychain 2>/dev/null || true
+        fi
+    done
+    rm -rf "$tmp_dir"
+}
+
 port_for() {
     case "$1" in
         elastic.*) echo 5601 ;;
@@ -155,6 +191,7 @@ if [[ "$mode" == "1" ]]; then
     else
         echo "Installing as trusted root (requires sudo)..."
     fi
+    remove_old_cn "$root_cert"
     install_trust "$root_cert"
 
 elif [[ "$mode" == "2" ]]; then
@@ -242,6 +279,7 @@ elif [[ "$mode" == "2" ]]; then
         echo "Installing ${#roots[@]} new trusted root(s)..."
     fi
     for r in "${roots[@]}"; do
+        remove_old_cn "$r"
         install_trust "$r"
     done
 
