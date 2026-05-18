@@ -6,9 +6,21 @@ top-of-chain cert as a trusted root.
 | Script | Platform | Trust store |
 |--------|----------|-------------|
 | `trust-cert-mac.sh` | macOS | System keychain (`security`) |
+| `trust-cert-linux.sh` | Linux (desktop) | System CA store + Firefox/Chrome NSS DBs |
 | `trust-cert-windows.ps1` | Windows | Certificate Store (`LocalMachine\Root`) |
 
 ## Requirements
+
+### Linux (`trust-cert-linux.sh`)
+
+- `openssl` — available via `apt-get install openssl` / `dnf install openssl`.
+- `expect` — only needed for multi-cert mode.
+  Install: `apt-get install expect` / `dnf install expect` / `pacman -S expect`.
+- `certutil` (optional) — enables trust in Firefox and Chrome/Chromium NSS DBs.
+  Install: `apt-get install libnss3-tools` / `dnf install nss-tools`.
+- `sudo` privileges for system cert store changes.
+- Supported distros: Debian, Ubuntu and derivatives; RHEL, CentOS, Fedora, Rocky, AlmaLinux;
+  Arch Linux and derivatives; openSUSE.
 
 ### macOS (`trust-cert-mac.sh`)
 
@@ -33,7 +45,7 @@ Clone the repo and make the script executable:
 ```sh
 git clone git@github.com:dalybastille/trust_certs.git
 cd trust_certs
-chmod +x trust-bn.sh
+chmod +x trust-cert-mac.sh trust-cert-linux.sh
 ```
 
 If you don't have SSH access set up for GitHub, use HTTPS instead:
@@ -47,6 +59,11 @@ git clone https://github.com/dalybastille/trust_certs.git
 **macOS:**
 ```
 ./trust-cert-mac.sh [-h] [-n|--dry-run]
+```
+
+**Linux:**
+```
+./trust-cert-linux.sh [-h] [-n|--dry-run]
 ```
 
 **Windows (run from an elevated PowerShell):**
@@ -86,11 +103,29 @@ the TLS chain, prints the chain's subject lines, and installs the
 ### Dry run
 
 **macOS:** `./trust-cert-mac.sh --dry-run` (or `-n`)  
+**Linux:** `./trust-cert-linux.sh --dry-run` (or `-n`)  
 **Windows:** `.\trust-cert-windows.ps1 -DryRun`
 
 Does everything except the actual trust installation — no keychain/store
 changes, no elevated privileges required. Use this to preview which certs
 would be installed.
+
+## Browser trust on Linux
+
+After installing into the system CA store, `trust-cert-linux.sh` also
+installs the cert into:
+
+- **Firefox** — all profiles under `~/.mozilla/firefox/*/` and the Flatpak
+  path `~/.var/app/org.mozilla.firefox/...`.
+- **Chrome / Chromium** — the user NSS DB at `~/.pki/nssdb`.
+
+This requires `certutil` (`libnss3-tools` on Debian/Ubuntu, `nss-tools` on
+RHEL/Fedora). If `certutil` is not found, the system store is still updated
+and the browser step is skipped with a warning.
+
+> **Note:** Modern Chrome/Chromium on Linux reads the system CA store
+> directly, so the NSS DB step is mainly a belt-and-suspenders fallback.
+> Firefox always requires its own trust database to be updated.
 
 ## Output
 
@@ -117,17 +152,17 @@ intermediate that the server isn't sending the root for.
 
 ### Exclude hostnames
 
-Both scripts filter out infrastructure hosts that don't serve client-facing
+All scripts filter out infrastructure hosts that don't serve client-facing
 TLS. The pattern lives near the YAML parsing section:
 
-**macOS:** `grep -vE '^(kafka|concentrator|elastic[0-9]+|...)\.`  
+**macOS/Linux:** `grep -vE '^(kafka|concentrator|elastic[0-9]+|...)\.`  
 **Windows:** `$excludePrefix = '^(kafka|concentrator|elastic\d+|...)\.'`
 
 Add alternations to either to skip additional hosts.
 
 ### Per-host ports
 
-**macOS:**
+**macOS/Linux:**
 ```sh
 port_for() {
     case "$1" in
@@ -161,6 +196,21 @@ install is skipped. Safe to re-run.
 sudo security remove-trusted-cert -d ~/.trust-bn-certs/<dir>/cert_N.pem
 ```
 Or use Keychain Access → System keychain to edit/delete trust.
+
+**Linux:**
+```sh
+# Find the cert file that was installed (named after the cert's CN):
+ls /usr/local/share/ca-certificates/          # Debian/Ubuntu
+ls /etc/pki/ca-trust/source/anchors/         # RHEL/Fedora
+
+# Remove it and update the store:
+sudo rm /usr/local/share/ca-certificates/<name>.crt
+sudo update-ca-certificates
+
+# Also remove from Firefox/Chrome NSS DBs if certutil is installed:
+certutil -D -n "<cert-name>" -d sql:~/.mozilla/firefox/<profile>/
+certutil -D -n "<cert-name>" -d sql:~/.pki/nssdb
+```
 
 **Windows (elevated PowerShell):**
 ```powershell
