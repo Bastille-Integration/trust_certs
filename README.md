@@ -71,6 +71,19 @@ git clone https://github.com/dalybastille/trust_certs.git
 .\trust-cert-windows.ps1 [-DryRun] [-Help]
 ```
 
+> **"running scripts is disabled on this system"?** Windows blocks `.ps1`
+> files by default. Bypass the policy for just this run (no permanent
+> change) from an **elevated** PowerShell:
+> ```powershell
+> powershell -ExecutionPolicy Bypass -File .\trust-cert-windows.ps1
+> ```
+> Or allow local scripts for your user going forward, then run normally:
+> ```powershell
+> Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
+> ```
+> If you copied the file from a share or zip, also run
+> `Unblock-File .\trust-cert-windows.ps1` to clear the downloaded-file mark.
+
 Running either script starts an interactive prompt:
 
 ```
